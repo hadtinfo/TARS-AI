@@ -450,31 +450,54 @@ class STTManager:
             if audio_buffer.getbuffer().nbytes == 0:
                 queue_message("ERROR: No audio recorded for server transcription.")
                 return None
-
-            files = {"audio": ("audio.wav", audio_buffer, "audio/wav")}
+            files = {'audio': audio_buffer}
             response = requests.post(
-                f"{self.config['STT'].get('external_url')}/save_audio",
+                f"{self.config['STT'].get('external_url')}/transcribe",
                 files=files, timeout=10
             )
+
             if response.status_code == 200:
-                transcription = response.json().get("transcription", [])
+                transcription = response.json().get("transcription")
                 if transcription:
-                    raw_text = transcription[0].get("text", "").strip()
+                    raw_text = transcription.strip()
                     formatted_result = {
                         "text": raw_text,
                         "result": [
                             {
                                 "conf": 1.0,
-                                "start": seg.get("start", 0),
-                                "end": seg.get("end", 0),
-                                "word": seg.get("text", ""),
+                                "start": 0,
+                                "end": 0,
+                                "word": raw_text,
                             }
-                            for seg in transcription
                         ],
                     }
                     if self.utterance_callback:
                         self.utterance_callback(json.dumps(formatted_result))
                     return formatted_result
+            # files = {"audio": ("audio.wav", audio_buffer, "audio/wav")}
+            # response = requests.post(
+            #     f"{self.config['STT'].get('external_url')}/save_audio",
+            #     files=files, timeout=10
+            # )
+            # if response.status_code == 200:
+            #     transcription = response.json().get("transcription", [])
+            #     if transcription:
+            #         raw_text = transcription[0].get("text", "").strip()
+            #         formatted_result = {
+            #             "text": raw_text,
+            #             "result": [
+            #                 {
+            #                     "conf": 1.0,
+            #                     "start": seg.get("start", 0),
+            #                     "end": seg.get("end", 0),
+            #                     "word": seg.get("text", ""),
+            #                 }
+            #                 for seg in transcription
+            #             ],
+            #         }
+            #         if self.utterance_callback:
+            #             self.utterance_callback(json.dumps(formatted_result))
+            #         return formatted_result
         except requests.RequestException as e:
             queue_message(f"ERROR: Server transcription request failed: {e}")
         return None

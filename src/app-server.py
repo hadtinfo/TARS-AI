@@ -5,7 +5,7 @@ and audio transcription tasks using whisper models.
 """
 
 from flask import Flask, request, jsonify
-from transformers import BlipProcessor, BlipForConditionalGeneration
+from transformers import BlipProcessor, BlipForConditionalGeneration, WhisperProcessor, WhisperForConditionalGeneration
 from PIL import Image
 import torch
 import traceback
@@ -13,13 +13,42 @@ from faster_whisper import WhisperModel
 from flask_cors import CORS
 from io import BytesIO
 from datetime import datetime
+import os
+import torchaudio
+import soundfile as sf
+import tempfile
+import logging
+
 
 # Initialize Flask app and enable CORS
 app = Flask(__name__)
 CORS(app)
 
-# Set up device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize models globally within the main block
+blip_processor = None
+blip_model = None
+whisper_model = None
+_phowhisper_model = None
+_phowhisper_processor = None
+
+def initialize_phowhisper_model():
+    global _phowhisper_model
+    # Load model và processor
+    if _phowhisper_model is None:
+        logger.info("Loading PhoWhisper model (first time)...")
+        _phowhisper_processor = WhisperProcessor.from_pretrained("vinai/PhoWhisper-medium")
+        _phowhisper_model = WhisperForConditionalGeneration.from_pretrained("vinai/PhoWhisper-medium")
+        _phowhisper_model = _phowhisper_model.to(device)
+        logger.info(f"PhoWhisper Model loaded on {device}")
+    else:
+        logger.info("PhoWhisper model already loaded.")
+    return _phowhisper_model
 
 # Initialize BLIP model for image captioning
 def initialize_blip_model():
@@ -28,11 +57,11 @@ def initialize_blip_model():
         processor = BlipProcessor.from_pretrained(
             "Salesforce/blip-image-captioning-base", cache_dir="./src/vision"
         )
-        model = BlipForConditionalGeneration.from_pretrained(
+        bmodel = BlipForConditionalGeneration.from_pretrained(
             "Salesforce/blip-image-captioning-base", cache_dir="./src/vision"
         )
-        model.to(device)
-        return processor, model
+        bmodel.to(device)
+        return processor, bmodel
     except Exception as e:
         print("Error initializing BLIP model:", traceback.format_exc())
         raise e
@@ -78,11 +107,6 @@ def initialize_whisper_model(
     except Exception as e:
         print("Error initializing Whisper model:", traceback.format_exc())
         raise e
-
-# Initialize models globally within the main block
-blip_processor = None
-blip_model = None
-whisper_model = None
 
 # Routes
 @app.route('/caption', methods=['POST'])
@@ -146,15 +170,89 @@ def save_audio():
         print("Error occurred during audio transcription:", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
+def transcribe_audio(audio_path):
+    """Chuyển đổi audio thành text sử dụng PhoWhisper"""
+    try:
+        # Load audio file
+        audio_input, sample_rate = torchaudio.load(audio_path)
+
+        # Resample to 16kHz if needed
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+            audio_input = resampler(audio_input)
+
+        # Convert to mono if stereo
+        if audio_input.shape[0] > 1:
+            audio_input = torch.mean(audio_input, dim=0, keepdim=True)
+
+        # Prepare input
+        audio_input = audio_input.squeeze().numpy()
+        inputs = _phowhisper_processor(audio_input, sampling_rate=16000, return_tensors="pt")
+        input_features = inputs.input_features.to(device)
+
+        # Generate transcription
+        with torch.no_grad():
+            predicted_ids = _phowhisper_model.generate(input_features)
+
+        # Decode
+        transcription = _phowhisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)
+
+        return transcription[0]
+
+    except Exception as e:
+        logger.error(f"Error in transcription: {str(e)}")
+        raise
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    """API endpoint để transcribe audio"""
+    try:
+        if 'audio' not in request.files:
+            return jsonify({'error': 'No audio file provided'}), 400
+
+        audio_file = request.files['audio']
+
+        # Save temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+            audio_file.save(tmp_file.name)
+            tmp_path = tmp_file.name
+
+        # Transcribe
+        transcription = transcribe_audio(tmp_path)
+
+        # Clean up
+        os.unlink(tmp_path)
+
+        return jsonify({
+            'status': 'success',
+            'transcription': transcription
+        })
+
+    except Exception as e:
+        logger.error(f"Error in API: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'model': 'PhoWhisper-large',
+        'device': str(device)
+    })
 
 if __name__ == '__main__':
     try:
-        blip_processor, blip_model = initialize_blip_model()
-        whisper_model = initialize_whisper_model(
-            model_size="tiny", 
-            device="cuda" if torch.cuda.is_available() else "cpu", 
-            compute_type="int8_float16" if torch.cuda.is_available() else "int8"
-        )
-        app.run(host='0.0.0.0', port=5678)
+        # blip_processor, blip_model = initialize_blip_model()
+        pho_whisper_model = initialize_phowhisper_model()
+        # whisper_model = initialize_whisper_model(
+        #     model_size="tiny",
+        #     device="cuda" if torch.cuda.is_available() else "cpu",
+        #     compute_type="int8_float16" if torch.cuda.is_available() else "int8"
+        # )
+        app.run(host='0.0.0.0', port=5678, threaded=False)
     except Exception as e:
         print("Critical error during initialization:", traceback.format_exc())
