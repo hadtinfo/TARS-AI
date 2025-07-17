@@ -240,7 +240,7 @@ def health_check():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'model': 'PhoWhisper-large',
+        'model': 'PhoWhisper-medium',
         'device': str(device)
     })
 
