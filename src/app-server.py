@@ -38,7 +38,7 @@ _phowhisper_model = None
 _phowhisper_processor = None
 
 def initialize_phowhisper_model():
-    global _phowhisper_model
+    global _phowhisper_model, _phowhisper_processor
     # Load model và processor
     if _phowhisper_model is None:
         logger.info("Loading PhoWhisper model (first time)...")
