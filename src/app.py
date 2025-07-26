@@ -26,7 +26,7 @@ from modules.module_stt import STTManager
 from modules.module_tts import update_tts_settings
 from modules.module_btcontroller import *
 from modules.module_main import initialize_managers, wake_word_callback, utterance_callback, post_utterance_callback, start_bt_controller_thread, start_discord_bot, process_discord_message_callback
-from modules.module_vision import initialize_blip
+# from modules.module_vision import initialize_blip
 from modules.module_llm import initialize_manager_llm
 import modules.module_chatui
 
@@ -98,8 +98,8 @@ if __name__ == "__main__":
         flask_thread.start()
     
     # Initilize BLIP to speed up initial image capture
-    if CONFIG['VISION']['server_hosted'] != "True":
-        initialize_blip()
+    # if CONFIG['VISION']['server_hosted'] != "True":
+    #     initialize_blip()
     
     try:
         queue_message(f"LOAD: TARS-AI v1.03a running.")
