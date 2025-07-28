@@ -18,7 +18,7 @@ import json
 import sys
 from io import BytesIO
 from typing import Callable, Optional
-
+import logging
 import torch
 import torchaudio  # Faster than librosa for resampling
 import librosa
@@ -34,6 +34,7 @@ import requests
 from modules.module_messageQue import queue_message
 from modules.module_config import load_config
 
+logging.basicConfig(level=logging.INFO)
 CONFIG = load_config()
 
 # Suppress Vosk logs and parallelism warnings
@@ -451,7 +452,7 @@ class STTManager:
                 queue_message("ERROR: No audio recorded for server transcription.")
                 return None
             files = {'audio': audio_buffer}
-            queue_message("send audio to server")
+            logging.info("send audio to server")
             response = requests.post(
                 f"{self.config['STT'].get('external_url')}/transcribe",
                 files=files, timeout=60
@@ -461,7 +462,7 @@ class STTManager:
                 transcription = response.json().get("transcription")
                 if transcription:
                     raw_text = transcription.strip()
-                    queue_message(f"raw_text: {raw_text}")
+                    logging.info(f"raw_text: {raw_text}")
                     formatted_result = {
                         "text": raw_text,
                         "result": [
@@ -548,15 +549,16 @@ class STTManager:
                 10: 1e-2,
             }
             kws_threshold = threshold_map.get(int(self.config["STT"]["sensitivity"]), 1)
-            queue_message(f"1")
+            logging.info(f"1")
+
             speech = LiveSpeech(lm=False, keyphrase=self.WAKE_WORD, kws_threshold=kws_threshold)
-            queue_message(f"2")
+            logging.info(f"2")
 
             for phrase in speech:
-                queue_message(f"3")
+                logging.info(f"3")
                 text = phrase.hypothesis().lower()
-                queue_message(f"{text} ...")
-                queue_message(f"{self.WAKE_WORD} wake_word")
+                logging.info(f"{text} ...")
+                logging.info(f"{self.WAKE_WORD} wake_word")
                 if self.WAKE_WORD in text:
                     silent_frames = 0
                     if self.config["STT"].get("use_indicators"):
@@ -569,7 +571,7 @@ class STTManager:
                     queue_message(f"{character_name}: {wake_response}", stream=True)
                     if self.wake_word_callback:
                         self.wake_word_callback(wake_response)
-                        queue_message(f"{wake_response}")
+                        logging.info(f"{wake_response}")
                     return True
 
             # Fallback: check silence over iterations.
